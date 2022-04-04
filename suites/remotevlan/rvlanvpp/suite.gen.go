@@ -23,9 +23,9 @@ func (s *Suite) SetupSuite() {
 	}
 	r := s.Runner("../deployments-k8s/examples/remotevlan/rvlanvpp")
 	s.T().Cleanup(func() {
-		r.Run(`kubectl delete -k https://github.com/networkservicemesh/deployments-k8s/examples/remotevlan/rvlanvpp?ref=3bd78094512e964907787abbd5b192a3b3e6f3f1`)
+		r.Run(`kubectl delete -k ../../../examples/remotevlan/rvlanvpp`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/remotevlan/rvlanvpp?ref=3bd78094512e964907787abbd5b192a3b3e6f3f1`)
+	r.Run(`kubectl apply -k ../../../examples/remotevlan/rvlanvpp`)
 	r.Run(`kubectl -n nsm-system wait --for=condition=ready --timeout=2m pod -l app=forwarder-vpp`)
 }
 func (s *Suite) TestKernel2RVlanBreakout() {
@@ -34,7 +34,7 @@ func (s *Suite) TestKernel2RVlanBreakout() {
 		r.Run(`docker stop rvm-tester` + "\n" + `docker image rm rvm-tester:latest` + "\n" + `true`)
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/3bd78094512e964907787abbd5b192a3b3e6f3f1/examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`cat > first-iperf-s.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: iperf1-s` + "\n" + `  labels:` + "\n" + `    app: iperf1-s` + "\n" + `spec:` + "\n" + `  replicas: 2` + "\n" + `  selector:` + "\n" + `    matchLabels:` + "\n" + `      app: iperf1-s` + "\n" + `  template:` + "\n" + `    metadata:` + "\n" + `      labels:` + "\n" + `        app: iperf1-s` + "\n" + `      annotations:` + "\n" + `        networkservicemesh.io: kernel://finance-bridge/nsm-1` + "\n" + `    spec:` + "\n" + `      affinity:` + "\n" + `        podAntiAffinity:` + "\n" + `          requiredDuringSchedulingIgnoredDuringExecution:` + "\n" + `          - labelSelector:` + "\n" + `              matchExpressions:` + "\n" + `              - key: app` + "\n" + `                operator: In` + "\n" + `                values:` + "\n" + `                - iperf1-s` + "\n" + `            topologyKey: "kubernetes.io/hostname"` + "\n" + `      containers:` + "\n" + `      - name: iperf-server` + "\n" + `        image: networkstatic/iperf3:latest` + "\n" + `        imagePullPolicy: IfNotPresent` + "\n" + `        command: ["tail", "-f", "/dev/null"]` + "\n" + `EOF`)
 	r.Run(`kubectl apply -n ${NAMESPACE} -f ./first-iperf-s.yaml`)
 	r.Run(`kubectl -n ${NAMESPACE} wait --for=condition=ready --timeout=1m pod -l app=iperf1-s`)
@@ -51,7 +51,7 @@ func (s *Suite) TestKernel2RVlanInternal() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/3bd78094512e964907787abbd5b192a3b3e6f3f1/examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`cat > first-iperf-s.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: iperf1-s` + "\n" + `  labels:` + "\n" + `    app: iperf1-s` + "\n" + `spec:` + "\n" + `  replicas: 2` + "\n" + `  selector:` + "\n" + `    matchLabels:` + "\n" + `      app: iperf1-s` + "\n" + `  template:` + "\n" + `    metadata:` + "\n" + `      labels:` + "\n" + `        app: iperf1-s` + "\n" + `      annotations:` + "\n" + `        networkservicemesh.io: kernel://finance-bridge/nsm-1` + "\n" + `    spec:` + "\n" + `      affinity:` + "\n" + `        podAntiAffinity:` + "\n" + `          requiredDuringSchedulingIgnoredDuringExecution:` + "\n" + `          - labelSelector:` + "\n" + `              matchExpressions:` + "\n" + `              - key: app` + "\n" + `                operator: In` + "\n" + `                values:` + "\n" + `                - iperf1-s` + "\n" + `            topologyKey: "kubernetes.io/hostname"` + "\n" + `      containers:` + "\n" + `      - name: iperf-server` + "\n" + `        image: networkstatic/iperf3:latest` + "\n" + `        imagePullPolicy: IfNotPresent` + "\n" + `        command: ["tail", "-f", "/dev/null"]` + "\n" + `EOF`)
 	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- first-iperf-s.yaml` + "\n" + `` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -71,7 +71,7 @@ func (s *Suite) TestKernel2RVlanMultiNS() {
 		r.Run(`kubectl delete ns ${SECOND_NAMESPACE}`)
 		r.Run(`rm -rf ns-1 ns-2`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/3bd78094512e964907787abbd5b192a3b3e6f3f1/examples/use-cases/namespace.yaml)[0])` + "\n" + `FIRST_NAMESPACE=${NAMESPACE:10}` + "\n" + `NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/3bd78094512e964907787abbd5b192a3b3e6f3f1/examples/use-cases/namespace.yaml)[0])` + "\n" + `SECOND_NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `FIRST_NAMESPACE=${NAMESPACE:10}` + "\n" + `NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `SECOND_NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`mkdir -p ns-1 ns-2`)
 	r.Run(`cat > ns-1/first-client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: alpine-1` + "\n" + `  labels:` + "\n" + `    app: alpine-1` + "\n" + `spec:` + "\n" + `  replicas: 2` + "\n" + `  selector:` + "\n" + `    matchLabels:` + "\n" + `      app: alpine-1` + "\n" + `  template:` + "\n" + `    metadata:` + "\n" + `      labels:` + "\n" + `        app: alpine-1` + "\n" + `      annotations:` + "\n" + `        networkservicemesh.io: kernel://private-bridge.${FIRST_NAMESPACE}/nsm-1` + "\n" + `    spec:` + "\n" + `      affinity:` + "\n" + `        podAntiAffinity:` + "\n" + `          requiredDuringSchedulingIgnoredDuringExecution:` + "\n" + `          - labelSelector:` + "\n" + `              matchExpressions:` + "\n" + `              - key: app` + "\n" + `                operator: In` + "\n" + `                values:` + "\n" + `                - alpine-1` + "\n" + `            topologyKey: "kubernetes.io/hostname"` + "\n" + `      containers:` + "\n" + `      - name: alpine` + "\n" + `        image: alpine:3.15.0` + "\n" + `        imagePullPolicy: IfNotPresent` + "\n" + `        stdin: true` + "\n" + `        tty: true` + "\n" + `EOF`)
 	r.Run(`cat > ns-1/patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-remote-vlan` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `      - name: nse` + "\n" + `        env:` + "\n" + `          - name: NSM_CONNECT_TO` + "\n" + `            value: "registry.nsm-system:5002"` + "\n" + `          - name: NSM_SERVICES` + "\n" + `            value: "private-bridge.${FIRST_NAMESPACE} { vlan: 200; via: gw1 }"` + "\n" + `          - name: NSM_CIDR_PREFIX` + "\n" + `            value: "172.10.1.0/24"` + "\n" + `          - name: NSM_IPV6_PREFIX` + "\n" + `            value: "100:201::/64"` + "\n" + `EOF`)
