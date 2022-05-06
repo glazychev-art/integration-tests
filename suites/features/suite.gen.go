@@ -6,11 +6,13 @@ import (
 
 	"github.com/networkservicemesh/integration-tests/extensions/base"
 	"github.com/networkservicemesh/integration-tests/suites/basic"
+	"github.com/networkservicemesh/integration-tests/suites/features/vl3"
 )
 
 type Suite struct {
 	base.Suite
 	basicSuite basic.Suite
+	vl3Suite   vl3.Suite
 }
 
 func (s *Suite) SetupSuite() {
@@ -23,17 +25,47 @@ func (s *Suite) SetupSuite() {
 			v.SetupSuite()
 		}
 	}
+	s.RunIncludedSuites()
+}
+func (s *Suite) RunIncludedSuites() {
+	runTest := func(subSuite suite.TestingSuite, suiteName, testName string, subtest func()) {
+		type runner interface {
+			Run(name string, f func()) bool
+		}
+		defer func() {
+			if afterTestSuite, ok := subSuite.(suite.AfterTest); ok {
+				afterTestSuite.AfterTest(suiteName, testName)
+			}
+			if tearDownTestSuite, ok := subSuite.(suite.TearDownTestSuite); ok {
+				tearDownTestSuite.TearDownTest()
+			}
+		}()
+		if setupTestSuite, ok := subSuite.(suite.SetupTestSuite); ok {
+			setupTestSuite.SetupTest()
+		}
+		if beforeTestSuite, ok := subSuite.(suite.BeforeTest); ok {
+			beforeTestSuite.BeforeTest(suiteName, testName)
+		}
+		// Run test
+		subSuite.(runner).Run(testName, subtest)
+	}
+	s.Run("Vl3", func() {
+		s.vl3Suite.SetT(s.T())
+		s.vl3Suite.SetupSuite()
+		runTest(&s.vl3Suite, "Vl3", "TestBasic", s.vl3Suite.TestBasic)
+		runTest(&s.vl3Suite, "Vl3", "TestScale_from_zero", s.vl3Suite.TestScale_from_zero)
+	})
 }
 func (s *Suite) TestDns() {
 	r := s.Runner("../deployments-k8s/examples/features/dns")
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
 	r.Run(`cat > dnsutils.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: dnsutils` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://my-coredns-service/nsm-1` + "\n" + `  labels:` + "\n" + `    app: dnsutils` + "\n" + `    "spiffe.io/spiffe-id": "true"` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: dnsutils` + "\n" + `    image: k8s.gcr.io/e2e-test-images/jessie-dnsutils:1.3` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODES[0]}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `      - name: nse` + "\n" + `        env:` + "\n" + `          - name: NSM_SERVICE_NAMES` + "\n" + `            value: my-coredns-service` + "\n" + `          - name: NSM_CIDR_PREFIX` + "\n" + `            value: 172.16.1.100/31` + "\n" + `          - name: NSM_DNS_CONFIGS` + "\n" + `            value: "[{\"dns_server_ips\": [\"172.16.1.100\"], \"search_domains\": [\"my.coredns.service\"]}]"` + "\n" + `      - name: coredns` + "\n" + `        image: coredns/coredns:1.8.3` + "\n" + `        imagePullPolicy: IfNotPresent` + "\n" + `        resources:` + "\n" + `          limits:` + "\n" + `            memory: 170Mi` + "\n" + `          requests:` + "\n" + `            cpu: 100m` + "\n" + `            memory: 70Mi` + "\n" + `        args: [ "-conf", "/etc/coredns/Corefile" ]` + "\n" + `        volumeMounts:` + "\n" + `        - name: config-volume` + "\n" + `          mountPath: /etc/coredns` + "\n" + `          readOnly: true` + "\n" + `        ports:` + "\n" + `        - containerPort: 53` + "\n" + `          name: dns` + "\n" + `          protocol: UDP` + "\n" + `        - containerPort: 53` + "\n" + `          name: dns-tcp` + "\n" + `          protocol: TCP` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `      volumes:` + "\n" + `        - name: config-volume` + "\n" + `          configMap:` + "\n" + `            name: coredns` + "\n" + `            items:` + "\n" + `            - key: Corefile` + "\n" + `              path: Corefile` + "\n" + `EOF`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `resources:` + "\n" + `- dnsutils.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/dns/coredns-config-map.yaml` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../apps/nse-kernel` + "\n" + `` + "\n" + `resources:` + "\n" + `- dnsutils.yaml` + "\n" + `- ../../../examples/features/dns/coredns-config-map.yaml` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=5m pod dnsutils -n ${NAMESPACE}`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=5m pod -l app=nse-kernel -n ${NAMESPACE}`)
@@ -43,14 +75,54 @@ func (s *Suite) TestDns() {
 	r.Run(`kubectl exec ${NSC} -c dnsutils -n ${NAMESPACE} -- ping -c 4 my.coredns.service`)
 	r.Run(`kubectl exec ${NSC} -c dnsutils -n ${NAMESPACE} -- nslookup kubernetes.default`)
 }
+func (s *Suite) TestKernel2Kernel_dual_stack() {
+	r := s.Runner("../deployments-k8s/examples/features/dual-stack/Kernel2Kernel_dual_stack")
+	s.T().Cleanup(func() {
+		r.Run(`kubectl delete ns ${NAMESPACE}`)
+	})
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- ../../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: alpine` + "\n" + `  labels:` + "\n" + `    app: alpine` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://icmp-responder/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: alpine` + "\n" + `    image: alpine:3.15.0` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODE}` + "\n" + `EOF`)
+	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/31,2001:db8::/116` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
+	r.Run(`kubectl apply -k .`)
+	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ${NAMESPACE}`)
+	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ${NAMESPACE}`)
+	r.Run(`NSC=$(kubectl get pods -l app=alpine -n ${NAMESPACE} --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
+	r.Run(`NSE=$(kubectl get pods -l app=nse-kernel -n ${NAMESPACE} --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
+	r.Run(`kubectl exec ${NSC} -n ${NAMESPACE} -- ping -c 4 2001:db8::`)
+	r.Run(`kubectl exec ${NSE} -n ${NAMESPACE} -- ping -c 4 2001:db8::1`)
+	r.Run(`kubectl exec ${NSC} -n ${NAMESPACE} -- ping -c 4 172.16.1.100`)
+	r.Run(`kubectl exec ${NSE} -n ${NAMESPACE} -- ping -c 4 172.16.1.101`)
+}
+func (s *Suite) TestKernel2Wireguard2Kernel_dual_stack() {
+	r := s.Runner("../deployments-k8s/examples/features/dual-stack/Kernel2Wireguard2Kernel_dual_stack")
+	s.T().Cleanup(func() {
+		r.Run(`kubectl delete ns ${NAMESPACE}`)
+	})
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- ../../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: alpine` + "\n" + `  labels:` + "\n" + `    app: alpine` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://icmp-responder-ip/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: alpine` + "\n" + `    image: alpine:3.15.0` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODES[0]}` + "\n" + `EOF`)
+	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/31,2001:db8::/116` + "\n" + `            - name: NSM_PAYLOAD` + "\n" + `              value: IP` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: icmp-responder-ip` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `EOF`)
+	r.Run(`kubectl apply -k .`)
+	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ${NAMESPACE}`)
+	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ${NAMESPACE}`)
+	r.Run(`NSC=$(kubectl get pods -l app=alpine -n ${NAMESPACE} --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
+	r.Run(`NSE=$(kubectl get pods -l app=nse-kernel -n ${NAMESPACE} --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
+	r.Run(`kubectl exec ${NSC} -n ${NAMESPACE} -- ping -c 4 2001:db8::`)
+	r.Run(`kubectl exec ${NSE} -n ${NAMESPACE} -- ping -c 4 2001:db8::1`)
+	r.Run(`kubectl exec ${NSC} -n ${NAMESPACE} -- ping -c 4 172.16.1.100`)
+	r.Run(`kubectl exec ${NSE} -n ${NAMESPACE} -- ping -c 4 172.16.1.101`)
+}
 func (s *Suite) TestExclude_prefixes() {
 	r := s.Runner("../deployments-k8s/examples/features/exclude-prefixes")
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete configmap excluded-prefixes-config` + "\n" + `kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../apps/nsc-kernel` + "\n" + `- ../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: kernel://icmp-responder/nsm-1` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/30` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -f exclude-prefixes-config-map.yaml`)
@@ -67,8 +139,8 @@ func (s *Suite) TestExclude_prefixes_client() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/exclude-prefixes-client/test-client.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/exclude-prefixes-client/nsm-service-1.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/exclude-prefixes-client/nsm-service-2.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/exclude-prefixes-client/nse-kernel-1.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/exclude-prefixes-client/nse-kernel-2.yaml` + "\n" + `EOF`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- ../../../examples/features/exclude-prefixes-client/test-client.yaml` + "\n" + `- ../../../examples/features/exclude-prefixes-client/nsm-service-1.yaml` + "\n" + `- ../../../examples/features/exclude-prefixes-client/nsm-service-2.yaml` + "\n" + `- ../../../examples/features/exclude-prefixes-client/nse-kernel-1.yaml` + "\n" + `- ../../../examples/features/exclude-prefixes-client/nse-kernel-2.yaml` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ${NAMESPACE}`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel-1 -n ${NAMESPACE}`)
@@ -86,9 +158,9 @@ func (s *Suite) TestKernel2Kernel_ipv6() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources: ` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources: ` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- ../../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: alpine` + "\n" + `  labels:` + "\n" + `    app: alpine    ` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://icmp-responder/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: alpine` + "\n" + `    image: alpine:3.15.0` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 2001:db8::/116` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -104,9 +176,9 @@ func (s *Suite) TestKernel2Wireguard2Kernel_ipv6() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources: ` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources: ` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- ../../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: alpine` + "\n" + `  labels:` + "\n" + `    app: alpine    ` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://icmp-responder-ip/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: alpine` + "\n" + `    image: alpine:3.15.0` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODES[0]}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 2001:db8::/116` + "\n" + `            - name: NSM_PAYLOAD` + "\n" + `              value: IP` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: icmp-responder-ip` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -122,9 +194,9 @@ func (s *Suite) TestKernel2Wireguard2Memif_ipv6() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources: ` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-memif?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources: ` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- ../../../../apps/nse-memif` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: alpine` + "\n" + `  labels:` + "\n" + `    app: alpine    ` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://icmp-responder-ip/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: alpine` + "\n" + `    image: alpine:3.15.0` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODES[0]}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-memif` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 2001:db8::/116` + "\n" + `            - name: NSM_PAYLOAD` + "\n" + `              value: IP` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: icmp-responder-ip` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -140,9 +212,9 @@ func (s *Suite) TestMemif2Memif_ipv6() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-memif?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-memif?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../../apps/nsc-memif` + "\n" + `- ../../../../apps/nse-memif` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-memif` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: memif://icmp-responder/nsm-1` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-memif` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 2001:db8::/116` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -158,9 +230,9 @@ func (s *Suite) TestMemif2Wireguard2Kernel_ipv6() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-memif?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../../apps/nsc-memif` + "\n" + `- ../../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-memif` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: memif://icmp-responder-ip/nsm-1` + "\n" + `` + "\n" + `      nodeName: ${NODES[0]}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 2001:db8::/116` + "\n" + `            - name: NSM_PAYLOAD` + "\n" + `              value: IP` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: icmp-responder-ip` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -176,9 +248,9 @@ func (s *Suite) TestMemif2Wireguard2Memif_ipv6() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-memif?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-memif?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../../apps/nsc-memif` + "\n" + `- ../../../../apps/nse-memif` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-memif` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: memif://icmp-responder-ip/nsm-1` + "\n" + `` + "\n" + `      nodeName: ${NODES[0]}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-memif` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 2001:db8::/116` + "\n" + `            - name: NSM_PAYLOAD` + "\n" + `              value: IP` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: icmp-responder-ip` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -194,9 +266,9 @@ func (s *Suite) TestMutually_aware_nses() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/use-cases/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- nse-1.yaml` + "\n" + `- nse-2.yaml` + "\n" + `- config-file-nse-1.yaml` + "\n" + `- config-file-nse-2.yaml` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- nse-1.yaml` + "\n" + `- nse-2.yaml` + "\n" + `- config-file-nse-1.yaml` + "\n" + `- config-file-nse-2.yaml` + "\n" + `bases:` + "\n" + `- ../../../apps/nsc-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `EOF`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: kernel://icmp-responder-1/nsm-1?color=red,kernel://icmp-responder-2/nsm-2?color=red` + "\n" + `            - name: NSM_AWARENESS_GROUPS` + "\n" + `              value: "[kernel://icmp-responder-1/nsm-1?color=red,kernel://icmp-responder-2/nsm-2?color=red]"` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nsc-kernel -n ${NAMESPACE}`)
@@ -212,9 +284,9 @@ func (s *Suite) TestNse_composition() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/nse-composition/config-file.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/nse-composition/passthrough-1.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/nse-composition/passthrough-2.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/nse-composition/passthrough-3.yaml` + "\n" + `- https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/nse-composition/nse-composition-ns.yaml` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/examples/features/nse-composition/nse-firewall?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- ../../../examples/features/nse-composition/config-file.yaml` + "\n" + `- ../../../examples/features/nse-composition/passthrough-1.yaml` + "\n" + `- ../../../examples/features/nse-composition/passthrough-2.yaml` + "\n" + `- ../../../examples/features/nse-composition/passthrough-3.yaml` + "\n" + `- ../../../examples/features/nse-composition/nse-composition-ns.yaml` + "\n" + `- client.yaml` + "\n" + `bases:` + "\n" + `- ../../../apps/nse-kernel` + "\n" + `- ../../../examples/features/nse-composition/nse-firewall` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: alpine` + "\n" + `  labels:` + "\n" + `    app: alpine    ` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://nse-composition/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: alpine` + "\n" + `    image: alpine:3.15.0` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/31` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: "nse-composition"` + "\n" + `            - name: NSM_REGISTER_SERVICE` + "\n" + `              value: "false"` + "\n" + `            - name: NSM_LABELS` + "\n" + `              value: "app:gateway"` + "\n" + `        - name: nginx` + "\n" + `          image: networkservicemesh/nginx` + "\n" + `          imagePullPolicy: IfNotPresent` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -232,9 +304,9 @@ func (s *Suite) TestOpa() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../apps/nsc-kernel` + "\n" + `- ../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_MAX_TOKEN_LIFETIME` + "\n" + `              value: -1m` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: kernel://icmp-responder/nsm-1` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/31` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -249,9 +321,9 @@ func (s *Suite) TestPolicy_based_routing() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODE=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}')[0])`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- client.yaml` + "\n" + `- config-file-nse.yaml` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `resources:` + "\n" + `- client.yaml` + "\n" + `- config-file-nse.yaml` + "\n" + `bases:` + "\n" + `- ../../../apps/nse-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`cat > client.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: nettools` + "\n" + `  labels:` + "\n" + `    app: nettools` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://icmp-responder/nsm-1` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: nettools` + "\n" + `    image: travelping/nettools:1.10.1` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    stdin: true` + "\n" + `    tty: true` + "\n" + `  nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/31` + "\n" + `          volumeMounts:` + "\n" + `            - mountPath: /etc/policy-based-routing/config.yaml` + "\n" + `              subPath: config.yaml` + "\n" + `              name: policies-config-volume` + "\n" + `      volumes:` + "\n" + `        - name: policies-config-volume` + "\n" + `          configMap:` + "\n" + `            name: policies-config-file` + "\n" + `      nodeName: ${NODE}` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
@@ -273,12 +345,12 @@ func (s *Suite) TestScale_from_zero() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 		r.Run(`kubectl delete -n nsm-system networkservices.networkservicemesh.io autoscale-icmp-responder`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints }}{{ .metadata.name }} {{end}}{{end}}'))` + "\n" + `NSC_NODE=${NODES[0]}` + "\n" + `SUPPLIER_NODE=${NODES[1]}` + "\n" + `if [ "$SUPPLIER_NODE" == "" ]; then SUPPLIER_NODE=$NSC_NODE; echo "Only 1 node found, testing that pod is created on the same node is useless"; fi`)
 	r.Run(`cat > patch-nsc.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nsc-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      nodeName: $NSC_NODE` + "\n" + `      containers:` + "\n" + `        - name: nsc` + "\n" + `          env:` + "\n" + `            - name: NSM_NETWORK_SERVICES` + "\n" + `              value: kernel://autoscale-icmp-responder/nsm-1` + "\n" + `            - name: NSM_REQUEST_TIMEOUT` + "\n" + `              value: 30s` + "\n" + `EOF`)
 	r.Run(`cat > patch-supplier.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-supplier-k8s` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      nodeName: $SUPPLIER_NODE` + "\n" + `      containers:` + "\n" + `        - name: nse-supplier` + "\n" + `          env:` + "\n" + `            - name: NSM_SERVICE_NAME` + "\n" + `              value: autoscale-icmp-responder` + "\n" + `            - name: NSM_LABELS` + "\n" + `              value: app:icmp-responder-supplier` + "\n" + `            - name: NSM_NAMESPACE` + "\n" + `              valueFrom:` + "\n" + `                fieldRef:` + "\n" + `                  fieldPath: metadata.namespace` + "\n" + `            - name: NSM_POD_DESCRIPTION_FILE` + "\n" + `              value: /run/supplier/pod-template.yaml` + "\n" + `          volumeMounts:` + "\n" + `            - name: pod-file` + "\n" + `              mountPath: /run/supplier` + "\n" + `              readOnly: true` + "\n" + `      volumes:` + "\n" + `        - name: pod-file` + "\n" + `          configMap:` + "\n" + `            name: supplier-pod-template-configmap` + "\n" + `EOF`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: $NAMESPACE` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-supplier-k8s?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nsc-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-supplier.yaml` + "\n" + `` + "\n" + `configMapGenerator:` + "\n" + `  - name: supplier-pod-template-configmap` + "\n" + `    files:` + "\n" + `      - https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/scale-from-zero/pod-template.yaml` + "\n" + `EOF`)
-	r.Run(`kubectl apply -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/scale-from-zero/autoscale-netsvc.yaml`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: $NAMESPACE` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../apps/nse-supplier-k8s` + "\n" + `- ../../../apps/nsc-kernel` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nsc.yaml` + "\n" + `- patch-supplier.yaml` + "\n" + `` + "\n" + `configMapGenerator:` + "\n" + `  - name: supplier-pod-template-configmap` + "\n" + `    files:` + "\n" + `      - ../../../examples/features/scale-from-zero/pod-template.yaml` + "\n" + `EOF`)
+	r.Run(`kubectl apply -f ../../../examples/features/scale-from-zero/autoscale-netsvc.yaml`)
 	r.Run(`kubectl apply -k .`)
 	r.Run(`kubectl wait -n $NAMESPACE --for=condition=ready --timeout=1m pod -l app=nse-supplier-k8s`)
 	r.Run(`kubectl wait -n $NAMESPACE --for=condition=ready --timeout=1m pod -l app=nsc-kernel`)
@@ -297,7 +369,7 @@ func (s *Suite) TestSelect_forwarder() {
 		r.Run(`kubectl delete ns ns-select-forwarder`)
 	})
 	r.Run(`kubectl create ns ns-select-forwarder`)
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/features/select-forwarder?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6`)
+	r.Run(`kubectl apply -k ../../../examples/features/select-forwarder`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ns-select-forwarder`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-select-forwarder`)
 	r.Run(`NSC=$(kubectl get pods -l app=alpine -n ns-select-forwarder --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
@@ -306,27 +378,16 @@ func (s *Suite) TestSelect_forwarder() {
 	r.Run(`kubectl exec ${NSE} -n ns-select-forwarder -- ping -c 4 169.254.0.1`)
 	r.Run(`kubectl logs ${NSC} -c cmd-nsc -n ns-select-forwarder | grep "my-forwarder-vpp"`)
 }
-func (s *Suite) TestVl3() {
-	r := s.Runner("../deployments-k8s/examples/features/vl3")
-	s.T().Cleanup(func() {
-		r.Run(`kubectl delete ns ns-vl3`)
-	})
-	r.Run(`kubectl create ns ns-vl3`)
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/features/vl3?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6`)
-	r.Run(`nscs=$(kubectl  get pods -l app=nsc-kernel -o go-template --template="{{range .items}}{{.metadata.name}} {{end}}" -n ns-vl3) ` + "\n" + `[[ ! -z $nscs ]]`)
-	r.Run(`for nsc in $nscs ` + "\n" + `do` + "\n" + `    ipAddr=$(kubectl exec -n ns-vl3 $nsc -- ifconfig nsm-1)` + "\n" + `    ipAddr=$(echo $ipAddr | grep -Eo 'inet addr:[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'| cut -c 11-)` + "\n" + `    for pinger in $nscs` + "\n" + `    do` + "\n" + `        echo $pinger pings $ipAddr` + "\n" + `        kubectl exec $pinger -n ns-vl3 -- ping -c4 $ipAddr` + "\n" + `    done` + "\n" + `done`)
-	r.Run(`for nsc in $nscs ` + "\n" + `do` + "\n" + `    echo $nsc pings nses` + "\n" + `    kubectl exec -n ns-vl3 $nsc -- ping 169.254.0.0 -c4` + "\n" + `    kubectl exec -n ns-vl3 $nsc -- ping 169.254.1.0 -c4` + "\n" + `done`)
-}
 func (s *Suite) TestWebhook() {
 	r := s.Runner("../deployments-k8s/examples/features/webhook")
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ${NAMESPACE}`)
 	})
-	r.Run(`NAMESPACE=($(kubectl create -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/0fd8d67331fc291a8165db296f3bf5750083a8e6/examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
+	r.Run(`NAMESPACE=($(kubectl create -f ../../../examples/features/namespace.yaml)[0])` + "\n" + `NAMESPACE=${NAMESPACE:10}`)
 	r.Run(`NODES=($(kubectl get nodes -o go-template='{{range .items}}{{ if not .spec.taints  }}{{index .metadata.labels "kubernetes.io/hostname"}} {{end}}{{end}}'))`)
 	r.Run(`cat > postgres-cl.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: v1` + "\n" + `kind: Pod` + "\n" + `metadata:` + "\n" + `  name: postgres-cl` + "\n" + `  annotations:` + "\n" + `    networkservicemesh.io: kernel://my-postgres-service/nsm-1` + "\n" + `  labels:` + "\n" + `    app: postgres-cl` + "\n" + `spec:` + "\n" + `  containers:` + "\n" + `  - name: postgres-cl` + "\n" + `    image: postgres` + "\n" + `    imagePullPolicy: IfNotPresent` + "\n" + `    env:` + "\n" + `      - name: POSTGRES_HOST_AUTH_METHOD` + "\n" + `        value: trust` + "\n" + `  nodeName: ${NODES[0]}` + "\n" + `EOF`)
 	r.Run(`cat > patch-nse.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: apps/v1` + "\n" + `kind: Deployment` + "\n" + `metadata:` + "\n" + `  name: nse-kernel` + "\n" + `spec:` + "\n" + `  template:` + "\n" + `    spec:` + "\n" + `      containers:` + "\n" + `        - name: postgres` + "\n" + `          image: postgres` + "\n" + `          imagePullPolicy: IfNotPresent` + "\n" + `          ports:` + "\n" + `            - containerPort: 5432` + "\n" + `          env:` + "\n" + `            - name: POSTGRES_DB` + "\n" + `              value: test` + "\n" + `            - name: POSTGRES_USER` + "\n" + `              value: admin` + "\n" + `            - name: POSTGRES_PASSWORD` + "\n" + `              value: admin` + "\n" + `        - name: nse` + "\n" + `          env:` + "\n" + `            - name: NSM_SERVICE_NAMES` + "\n" + `              value: my-postgres-service` + "\n" + `            - name: NSM_CIDR_PREFIX` + "\n" + `              value: 172.16.1.100/31` + "\n" + `      nodeName: ${NODES[1]}` + "\n" + `EOF`)
-	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- https://github.com/networkservicemesh/deployments-k8s/apps/nse-kernel?ref=0fd8d67331fc291a8165db296f3bf5750083a8e6` + "\n" + `` + "\n" + `resources:` + "\n" + `- postgres-cl.yaml` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
+	r.Run(`cat > kustomization.yaml <<EOF` + "\n" + `---` + "\n" + `apiVersion: kustomize.config.k8s.io/v1beta1` + "\n" + `kind: Kustomization` + "\n" + `` + "\n" + `namespace: ${NAMESPACE}` + "\n" + `` + "\n" + `bases:` + "\n" + `- ../../../apps/nse-kernel` + "\n" + `` + "\n" + `resources:` + "\n" + `- postgres-cl.yaml` + "\n" + `` + "\n" + `patchesStrategicMerge:` + "\n" + `- patch-nse.yaml` + "\n" + `EOF`)
 	r.Run(`kubectl apply -k .`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=5m pod -l app=nse-kernel -n ${NAMESPACE}`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod postgres-cl -n ${NAMESPACE}`)

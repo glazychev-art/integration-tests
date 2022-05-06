@@ -19,11 +19,11 @@ package base
 
 import (
 	"fmt"
+	"github.com/networkservicemesh/integration-tests/extensions/logs"
 	"strings"
 
 	"github.com/networkservicemesh/gotestmd/pkg/suites/shell"
 	"github.com/networkservicemesh/integration-tests/extensions/checkout"
-	"github.com/networkservicemesh/integration-tests/extensions/logs"
 	"github.com/networkservicemesh/integration-tests/extensions/prefetch"
 )
 
@@ -52,12 +52,12 @@ func (s *Suite) TearDownSuite() {
 }
 
 const (
-	sha = "26ea5dc7e8ce3e11f79f134923933b6c9a18fe4a"
+	sha = "8770a2662531c00179b772e2442472462be646d4"
 )
 
 // SetupSuite runs all extensions
 func (s *Suite) SetupSuite() {
-	repo := "networkservicemesh/deployments-k8s"
+	repo := "glazychev-art/deployments-k8s"
 	version := sha[:8]
 
 	s.checkout.Version = version

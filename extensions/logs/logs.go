@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -60,9 +61,9 @@ var (
 type Config struct {
 	KubeConfig        string        `default:"" desc:".kube config file path" envconfig:"KUBECONFIG"`
 	ArtifactsDir      string        `default:"logs" desc:"Directory for storing container logs" envconfig:"ARTIFACTS_DIR"`
-	Timeout           time.Duration `default:"5s" desc:"Context timeout for kubernetes queries" split_words:"true"`
+	Timeout           time.Duration `default:"50s" desc:"Context timeout for kubernetes queries" split_words:"true"`
 	WorkerCount       int           `default:"8" desc:"Number of log collector workers" split_words:"true"`
-	AllowedNamespaces string        `default:"(ns-.*)|(nsm-system)|(spire)|(observability)" desc:"Regex of allowed namespaces" split_words:"true"`
+	AllowedNamespaces string        `default:"(ns-.*)|(nsm-system)|(spire)|(observability)|(kube-system)" desc:"Regex of allowed namespaces" split_words:"true"`
 }
 
 func savePodLogs(ctx context.Context, pod *corev1.Pod, opts *corev1.PodLogOptions, fromInitContainers bool, dir string) {
@@ -204,6 +205,15 @@ func capture(name string) context.CancelFunc {
 
 	return func() {
 		captureLogs(now, dir)
+
+		runner, err := bash.New()
+		if err != nil {
+			return
+		}
+		_, _, exitCode, err := runner.Run("docker logs cmd-nse-simple-vl3-docker " + ">" + filepath.Join(config.ArtifactsDir, name, "docker-logs"+rand.String(5)+".log"))
+		if exitCode != 0 || err != nil {
+			logrus.Errorf("An error while retrieving describe for namespace:")
+		}
 	}
 }
 
