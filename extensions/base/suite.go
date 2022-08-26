@@ -83,7 +83,7 @@ func (s *Suite) SetupSuite() {
 	}
 
 	s.prefetch.SetT(s.T())
-	s.prefetch.SetupSuite()
+	//s.prefetch.SetupSuite()
 
 	s.storeSuiteLogs = logs.Capture(s.T().Name())
 }
