@@ -41,7 +41,7 @@ func (s *Suite) TestNsm_consul() {
 		r.Run(`kubectl --kubeconfig=$KUBECONFIG2 delete pods --all`)
 		r.Run(`consul-k8s uninstall --kubeconfig=$KUBECONFIG2 -auto-approve=true -wipe-data=true`)
 	})
-	r.Run(`brew tap hashicorp/tap` + "\n" + `brew install hashicorp/tap/consul-k8s`)
+	r.Run(`curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -` + "\n" + `sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"` + "\n" + `sudo apt-get update && sudo apt-get install consul-k8s` + "\n" + `consul-k8s version`)
 	r.Run(`consul-k8s install -config-file=helm-consul-values.yaml -set global.image=hashicorp/consul:1.12.0 -auto-approve --kubeconfig=$KUBECONFIG2`)
 	r.Run(`kubectl --kubeconfig=$KUBECONFIG2 apply -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/1f8f5b0690d0a3b7e97619e653505647bdb21727/examples/interdomain/nsm_consul/networkservice.yaml`)
 	r.Run(`kubectl --kubeconfig=$KUBECONFIG1 apply -f https://raw.githubusercontent.com/networkservicemesh/deployments-k8s/1f8f5b0690d0a3b7e97619e653505647bdb21727/examples/interdomain/nsm_consul/client/dashboard.yaml`)

@@ -52,12 +52,12 @@ func (s *Suite) TearDownSuite() {
 }
 
 const (
-	sha = "9cfbd9c2546dccce4fb05a48dd3cd8e038c3c7f8"
+	sha = "70f9de7a03e8c98124d2f4824792e47f18e74943"
 )
 
 // SetupSuite runs all extensions
 func (s *Suite) SetupSuite() {
-	repo := "networkservicemesh/deployments-k8s"
+	repo := "glazychev-art/deployments-k8s"
 	version := sha[:8]
 
 	s.checkout.Version = version
@@ -83,7 +83,7 @@ func (s *Suite) SetupSuite() {
 	}
 
 	s.prefetch.SetT(s.T())
-	s.prefetch.SetupSuite()
+	//s.prefetch.SetupSuite()
 
 	s.storeSuiteLogs = logs.Capture(s.T().Name())
 }
