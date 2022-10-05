@@ -32,7 +32,7 @@ func (s *Suite) SetupSuite() {
 		r.Run(`kubectl delete ns nsm-system`)
 	})
 	r.Run(`kubectl create ns nsm-system`)
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/k8s_monolith/configuration/cluster?ref=2dbc67a434ce864fe0aca418e578d2fa78e2fcb6`)
+	r.Run(`kubectl apply -k ../../../examples/k8s_monolith/configuration/cluster`)
 	r.Run(`kubectl get services registry -n nsm-system -o go-template='{{index (index (index (index .status "loadBalancer") "ingress") 0) "ip"}}'`)
 }
 func (s *Suite) TestKernel2Wireguard2Kernel() {
@@ -41,7 +41,7 @@ func (s *Suite) TestKernel2Wireguard2Kernel() {
 		r.Run(`kubectl delete ns ns-kernel2wireguard2kernel-monolith-nse`)
 	})
 	r.Run(`kubectl create ns ns-kernel2wireguard2kernel-monolith-nse`)
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/k8s_monolith/external_nse/usecases/Kernel2Wireguard2Kernel?ref=2dbc67a434ce864fe0aca418e578d2fa78e2fcb6`)
+	r.Run(`kubectl apply -k ../../../../../examples/k8s_monolith/external_nse/usecases/Kernel2Wireguard2Kernel`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nsc-kernel -n ns-kernel2wireguard2kernel-monolith-nse`)
 	r.Run(`nscs=$(kubectl  get pods -l app=nsc-kernel -o go-template --template="{{range .items}}{{.metadata.name}} {{end}}" -n ns-kernel2wireguard2kernel-monolith-nse)` + "\n" + `[[ ! -z $nscs ]]`)
 	r.Run(`for nsc in $nscs` + "\n" + `do` + "\n" + `    ipAddr=$(kubectl exec -n ns-kernel2wireguard2kernel-monolith-nse $nsc -- ifconfig nsm-1)` + "\n" + `    ipAddr=$(echo $ipAddr | grep -Eo 'inet addr:[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'| cut -c 11-)` + "\n" + `    for pinger in $nscs` + "\n" + `    do` + "\n" + `        echo $pinger pings $ipAddr` + "\n" + `        kubectl exec $pinger -n ns-kernel2wireguard2kernel-monolith-nse -- ping -c4 $ipAddr` + "\n" + `    done` + "\n" + `done`)
