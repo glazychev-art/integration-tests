@@ -27,7 +27,7 @@ func (s *Suite) SetupSuite() {
 	s.T().Cleanup(func() {
 		r.Run(`WH=$(kubectl get pods -l app=admission-webhook-k8s -n nsm-system --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')` + "\n" + `kubectl delete mutatingwebhookconfiguration ${WH}` + "\n" + `kubectl delete ns nsm-system`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/multiforwarder?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../examples/multiforwarder`)
 	r.Run(`WH=$(kubectl get pods -l app=admission-webhook-k8s -n nsm-system --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')` + "\n" + `kubectl wait --for=condition=ready --timeout=1m pod ${WH} -n nsm-system`)
 }
 func (s *Suite) TestKernel2Ethernet2Kernel() {
@@ -35,7 +35,7 @@ func (s *Suite) TestKernel2Ethernet2Kernel() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ns-kernel2ethernet2kernel`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/Kernel2Ethernet2Kernel?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/Kernel2Ethernet2Kernel`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ns-kernel2ethernet2kernel`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-kernel2ethernet2kernel`)
 	r.Run(`NSC=$(kubectl get pods -l app=alpine -n ns-kernel2ethernet2kernel --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
@@ -50,7 +50,7 @@ func (s *Suite) TestKernel2Ethernet2Kernel_Vfio2Noop() {
 		r.Run(`kubectl -n ns-kernel2ethernet2kernel-vfio2noop exec ${NSE_VFIO} --container ponger -- /bin/bash -c '\` + "\n" + `  (sleep 10 && kill $(pgrep "pingpong")) 1>/dev/null 2>&1 &                    \` + "\n" + `'`)
 		r.Run(`kubectl delete ns ns-kernel2ethernet2kernel-vfio2noop`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/Kernel2Ethernet2Kernel_Vfio2Noop?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/Kernel2Ethernet2Kernel_Vfio2Noop`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ns-kernel2ethernet2kernel-vfio2noop`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-kernel2ethernet2kernel-vfio2noop`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nsc-vfio -n ns-kernel2ethernet2kernel-vfio2noop`)
@@ -68,7 +68,7 @@ func (s *Suite) TestKernel2Kernel() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ns-kernel2kernel`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/Kernel2Kernel?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/Kernel2Kernel`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ns-kernel2kernel`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-kernel2kernel`)
 	r.Run(`NSC=$(kubectl get pods -l app=alpine -n ns-kernel2kernel --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
@@ -83,7 +83,7 @@ func (s *Suite) TestKernel2Kernel_Vfio2Noop() {
 		r.Run(`kubectl -n ns-kernel2kernel-vfio2noop exec ${NSE_VFIO} --container ponger -- /bin/bash -c '\` + "\n" + `  (sleep 10 && kill $(pgrep "pingpong")) 1>/dev/null 2>&1 &                    \` + "\n" + `'`)
 		r.Run(`kubectl delete ns ns-kernel2kernel-vfio2noop`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/Kernel2Kernel_Vfio2Noop?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/Kernel2Kernel_Vfio2Noop`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=alpine -n ns-kernel2kernel-vfio2noop`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-kernel2kernel-vfio2noop`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nsc-vfio -n ns-kernel2kernel-vfio2noop`)
@@ -101,7 +101,7 @@ func (s *Suite) TestMemif2Memif() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ns-memif2memif`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/Memif2Memif?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/Memif2Memif`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nsc-memif -n ns-memif2memif`)
 	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-memif -n ns-memif2memif`)
 	r.Run(`NSC=$(kubectl get pods -l app=nsc-memif -n ns-memif2memif --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
@@ -114,10 +114,10 @@ func (s *Suite) TestSriovKernel2Noop() {
 	s.T().Cleanup(func() {
 		r.Run(`kubectl delete ns ns-sriov-kernel2noop`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/SriovKernel2Noop/ponger?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/SriovKernel2Noop/ponger`)
 	r.Run(`kubectl -n ns-sriov-kernel2noop wait --for=condition=ready --timeout=1m pod -l app=ponger`)
 	r.Run(`kubectl -n ns-sriov-kernel2noop exec deploy/ponger -- ip a | grep "172.16.1.100"`)
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/SriovKernel2Noop?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/SriovKernel2Noop`)
 	r.Run(`kubectl -n ns-sriov-kernel2noop wait --for=condition=ready --timeout=1m pod -l app=nsc-kernel`)
 	r.Run(`kubectl -n ns-sriov-kernel2noop wait --for=condition=ready --timeout=1m pod -l app=nse-kernel`)
 	r.Run(`NSC=$(kubectl -n ns-sriov-kernel2noop get pods -l app=nsc-kernel --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
@@ -130,7 +130,7 @@ func (s *Suite) TestVfio2Noop() {
 		r.Run(`kubectl -n ns-vfio2noop exec ${NSE} --container ponger -- /bin/bash -c '\` + "\n" + `  (sleep 10 && kill $(pgrep "pingpong")) 1>/dev/null 2>&1 &             \` + "\n" + `'`)
 		r.Run(`kubectl delete ns ns-vfio2noop`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/use-cases/Vfio2Noop?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/use-cases/Vfio2Noop`)
 	r.Run(`kubectl -n ns-vfio2noop wait --for=condition=ready --timeout=1m pod -l app=nsc-vfio`)
 	r.Run(`kubectl -n ns-vfio2noop wait --for=condition=ready --timeout=1m pod -l app=nse-vfio`)
 	r.Run(`NSC_VFIO=$(kubectl -n ns-vfio2noop get pods -l app=nsc-vfio --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
