@@ -35,17 +35,16 @@ func (s *Suite) SetupSuite() {
 	s.T().Cleanup(func() {
 		r.Run(`WH=$(kubectl get pods -l app=admission-webhook-k8s -n nsm-system --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')` + "\n" + `kubectl delete mutatingwebhookconfiguration ${WH}` + "\n" + `kubectl delete ns nsm-system`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/k8s_monolith/configuration/cluster?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
+	r.Run(`kubectl apply -k ../../../examples/k8s_monolith/configuration/cluster`)
 	r.Run(`kubectl get services registry -n nsm-system -o go-template='{{index (index (index (index .status "loadBalancer") "ingress") 0) "ip"}}'`)
 }
-func (s *Suite) TestKernel2Wireguard2Kernel() {
-	r := s.Runner("../deployments-k8s/examples/k8s_monolith/external_nsc/usecases/Kernel2Wireguard2Kernel")
+func (s *Suite) TestKernel2IP2Kernel() {
+	r := s.Runner("../deployments-k8s/examples/k8s_monolith/external_nsc/usecases/Kernel2IP2Kernel")
 	s.T().Cleanup(func() {
-		r.Run(`kubectl delete ns ns-kernel2wireguard2kernel-monolith-nsc`)
+		r.Run(`kubectl delete ns ns-kernel2ip2kernel-monolith-nsc`)
 	})
-	r.Run(`kubectl apply -k https://github.com/networkservicemesh/deployments-k8s/examples/k8s_monolith/external_nsc/usecases/Kernel2Wireguard2Kernel?ref=e61f4fcb9caf8ea7e16e6e395066f0059fd620e6`)
-	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-kernel2wireguard2kernel-monolith-nsc`)
-	r.Run(`NSE=$(kubectl get pods -l app=nse-kernel -n ns-kernel2wireguard2kernel-monolith-nsc --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}')`)
+	r.Run(`kubectl apply -k ../../../../../examples/k8s_monolith/external_nsc/usecases/Kernel2IP2Kernel`)
+	r.Run(`kubectl wait --for=condition=ready --timeout=1m pod -l app=nse-kernel -n ns-kernel2ip2kernel-monolith-nsc`)
 	r.Run(`docker exec nsc-simple-docker ping -c4 172.16.1.100`)
-	r.Run(`kubectl exec ${NSE} -n ns-kernel2wireguard2kernel-monolith-nsc -- ping -c 4 172.16.1.101`)
+	r.Run(`kubectl exec deployments/nse-kernel -n ns-kernel2ip2kernel-monolith-nsc -- ping -c 4 172.16.1.101`)
 }
