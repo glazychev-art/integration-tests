@@ -21,7 +21,7 @@ func (s *Suite) SetupSuite() {
 			v.SetupSuite()
 		}
 	}
-	r := s.Runner("../deployments-k8s/examples/multicluster/dns")
+	r := s.Runner("../deployments-k8s/examples/interdomain/three_cluster_configuration/dns")
 	s.T().Cleanup(func() {
 		r.Run(`kubectl --kubeconfig=$KUBECONFIG1 delete service -n kube-system exposed-kube-dns` + "\n" + `kubectl --kubeconfig=$KUBECONFIG2 delete service -n kube-system exposed-kube-dns` + "\n" + `kubectl --kubeconfig=$KUBECONFIG3 delete service -n kube-system exposed-kube-dns`)
 	})
